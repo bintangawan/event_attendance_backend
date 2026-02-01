@@ -70,9 +70,16 @@ export const drawWinner = async (req, res) => {
       );
     }
 
-    // Ambil detail untuk dikirim balik
+    // --- PERBAIKAN DI SINI ---
+    // Tambahkan p.alamat di dalam SELECT agar data alamat dikirim ke frontend
     const [winners] = await pool.execute(
-      `SELECT w.winner_id, p.nama, ea.ticket_token, ea.attendance_id, w.hadiah
+      `SELECT 
+          w.winner_id, 
+          p.nama, 
+          p.alamat,  -- <--- TAMBAHKAN INI
+          ea.ticket_token, 
+          ea.attendance_id, 
+          w.hadiah
        FROM winners w
        JOIN event_attendances ea ON w.attendance_id = ea.attendance_id
        JOIN participants p ON ea.participant_id = p.participant_id
