@@ -4,12 +4,12 @@ import path from "path";
 
 /**
  * 1. PUBLIC: GET LANDING PAGE DATA
- * Mengambil event aktif + deskripsi + gallery dari database
+ * Mengambil event aktif + deskripsi + gallery + LIST PESERTA HADIR
  */
 export const getLandingPageDetails = async (req, res) => {
   try {
-    // A. Ambil Event yang sedang AKTIF
-    const [events] = await pool.execute(
+    // Gunakan pool.query (bukan execute) untuk stabilitas
+    const [events] = await pool.query(
       `SELECT event_id, event_code, nama_event, tanggal_event, jam_masuk_mulai, 
               jam_masuk_selesai, description, checkin_end_time 
        FROM events 
@@ -19,8 +19,7 @@ export const getLandingPageDetails = async (req, res) => {
 
     let activeEvent = null;
     let gallery = [];
-    
-    // Default description jika kosong
+    let attendees = []; 
     let description = "Selamat datang di sistem absensi event.";
 
     if (events.length > 0) {
@@ -29,33 +28,44 @@ export const getLandingPageDetails = async (req, res) => {
         description = activeEvent.description;
       }
 
-      // B. Ambil Gallery Gambar berdasarkan event_id
-      const [galleryRows] = await pool.execute(
+      // Ambil Gallery
+      const [galleryRows] = await pool.query(
         `SELECT gallery_id, image_url, caption FROM event_gallery WHERE event_id = ? ORDER BY created_at DESC`,
         [activeEvent.event_id]
       );
 
-      // Map URL agar bisa diakses frontend (Full URL)
       gallery = galleryRows.map(item => ({
         id: item.gallery_id,
-        // Asumsi backend berjalan di port yg sama/proxy, kita kirim relative path atau full path
-        // Di sini kita kirim relative path, frontend yang akan tambahkan base URL atau kita kirim full
         src: `${process.env.BASE_URL || 'http://localhost:5000'}${item.image_url}`, 
         caption: item.caption || "Event Documentation"
       }));
+
+      // Ambil List Peserta Hadir (status_hadir = 1)
+      const [attendeeRows] = await pool.query(
+        `SELECT p.nama, ea.status_konsumsi, ea.jam_masuk
+         FROM event_attendances ea
+         JOIN participants p ON ea.participant_id = p.participant_id
+         WHERE ea.event_id = ? AND ea.status_hadir = 1
+         ORDER BY ea.jam_masuk DESC`, 
+        [activeEvent.event_id]
+      );
+      
+      attendees = attendeeRows;
     }
 
     res.json({
-      message: "Berhasil memuat data landing page",
+      message: "Berhasil memuat data",
       data: {
         event: activeEvent,
         description: description,
-        gallery: gallery
+        gallery: gallery,
+        attendees: attendees
       }
     });
 
   } catch (error) {
     console.error("Error Landing Details:", error);
+    // Kirim response error JSON agar frontend tidak hang
     res.status(500).json({ message: "Gagal memuat detail event" });
   }
 };

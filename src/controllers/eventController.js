@@ -72,36 +72,59 @@ export const createEvent = async (req, res) => {
 };
 
 /**
- * GET ALL EVENTS (WITH PAGINATION)
+ * GET ALL EVENTS (WITH PAGINATION & FILTER)
+ * Tambahan: filter berdasarkan status
  */
 export const getAllEvents = async (req, res) => {
   try {
-    // 1. Get page and limit from query params (default: page 1, limit 10)
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
+    
+    // Filter berdasarkan status (aktif, selesai, draft)
+    const statusFilter = req.query.status; // ?status=aktif
 
-    // 2. Fetch data with LIMIT and OFFSET
-    // We use CAST/String for limit/offset parameters to ensure compatibility with some mysql drivers
-    const query = `
+    let query = `
       SELECT *,
       CASE 
         WHEN status_event = 'aktif' AND checkin_end_time <= NOW() THEN 'selesai'
         ELSE status_event
       END AS status_event
       FROM events 
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
     `;
-    
-    const [rows] = await pool.execute(query, [limit.toString(), offset.toString()]);
 
-    // 3. Count total items for pagination metadata
-    const [countResult] = await pool.execute("SELECT COUNT(*) as total FROM events");
+    let countQuery = "SELECT COUNT(*) as total FROM events";
+    const queryParams = [];
+    const countParams = [];
+
+    // Tambahkan filter status jika ada
+    if (statusFilter && ["aktif", "selesai", "draft"].includes(statusFilter)) {
+      if (statusFilter === "selesai") {
+        // Untuk status selesai: cek yang manual selesai ATAU yang sudah lewat checkin_end_time
+        query += " WHERE (status_event = 'selesai' OR (status_event = 'aktif' AND checkin_end_time <= NOW()))";
+        countQuery += " WHERE (status_event = 'selesai' OR (status_event = 'aktif' AND checkin_end_time <= NOW()))";
+      } else if (statusFilter === "aktif") {
+        // Untuk status aktif: yang aktif DAN belum lewat checkin_end_time
+        query += " WHERE status_event = 'aktif' AND checkin_end_time > NOW()";
+        countQuery += " WHERE status_event = 'aktif' AND checkin_end_time > NOW()";
+      } else {
+        // Untuk draft
+        query += " WHERE status_event = ?";
+        countQuery += " WHERE status_event = ?";
+        queryParams.push(statusFilter);
+        countParams.push(statusFilter);
+      }
+    }
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    queryParams.push(limit.toString(), offset.toString());
+
+    const [rows] = await pool.execute(query, queryParams);
+    const [countResult] = await pool.execute(countQuery, countParams);
+    
     const totalEvents = countResult[0].total;
     const totalPages = Math.ceil(totalEvents / limit);
 
-    // 4. Send response with pagination data
     res.json({
       data: rows,
       pagination: {
@@ -109,6 +132,9 @@ export const getAllEvents = async (req, res) => {
         totalPages: totalPages,
         currentPage: page,
         itemsPerPage: limit
+      },
+      filter: {
+        status: statusFilter || "all"
       }
     });
 
@@ -121,7 +147,8 @@ export const getAllEvents = async (req, res) => {
 };
 
 /**
- * GET EVENT DETAIL + QR
+ * GET EVENT DETAIL + QR (WITH ACCURATE STATUS)
+ * Perbaikan: Status selesai lebih akurat
  */
 export const getEventDetail = async (req, res) => {
   try {
@@ -130,9 +157,10 @@ export const getEventDetail = async (req, res) => {
     const [rows] = await pool.execute(
       `SELECT *,
        CASE 
+         WHEN status_event = 'selesai' THEN 'selesai'
          WHEN status_event = 'aktif' AND checkin_end_time <= NOW() THEN 'selesai'
          ELSE status_event
-       END AS status_event
+       END AS computed_status
        FROM events WHERE event_id = ?`,
       [id]
     );
@@ -147,10 +175,16 @@ export const getEventDetail = async (req, res) => {
     const checkinUrl = `${process.env.BASE_URL}/checkin/${event.event_code}`;
     const qrImage = await QRCode.toDataURL(checkinUrl);
 
+    // Gunakan computed_status untuk status yang akurat
+    const actualStatus = event.computed_status;
+
     res.json({
       ...event,
+      status_event: actualStatus, // Override dengan status yang akurat
       qr_checkin_url: checkinUrl,
-      qr_image: qrImage
+      qr_image: qrImage,
+      is_expired: new Date(event.checkin_end_time) <= new Date(), // Flag tambahan
+      can_be_activated: actualStatus !== "selesai" && new Date(event.checkin_end_time) > new Date()
     });
 
   } catch (error) {
@@ -205,7 +239,8 @@ export const updateEvent = async (req, res) => {
 };
 
 /**
- * UPDATE STATUS EVENT
+ * UPDATE STATUS EVENT (WITH VALIDATION)
+ * Validasi: Event yang sudah selesai tidak bisa diaktifkan kembali
  */
 export const updateEventStatus = async (req, res) => {
   try {
@@ -214,20 +249,55 @@ export const updateEventStatus = async (req, res) => {
 
     if (!["draft", "aktif", "selesai"].includes(status_event)) {
       return res.status(400).json({
-        message: "Status event tidak valid"
+        message: "Status event tidak valid. Pilih: draft, aktif, atau selesai"
       });
     }
 
+    // 1. Cek status event saat ini
+    const [rows] = await pool.execute(
+      `SELECT status_event, checkin_end_time FROM events WHERE event_id = ?`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Event tidak ditemukan"
+      });
+    }
+
+    const currentEvent = rows[0];
+    const currentStatus = currentEvent.status_event;
+    const checkinEndTime = new Date(currentEvent.checkin_end_time);
+    const now = new Date();
+
+    // 2. Validasi: Event yang sudah selesai tidak bisa diaktifkan kembali
+    if (currentStatus === "selesai" && status_event === "aktif") {
+      return res.status(400).json({
+        message: "Event yang sudah selesai tidak dapat diaktifkan kembali. Silakan buat event baru."
+      });
+    }
+
+    // 3. Validasi: Event yang sudah lewat checkin_end_time tidak bisa diaktifkan
+    if (status_event === "aktif" && checkinEndTime <= now) {
+      return res.status(400).json({
+        message: "Waktu check-in event sudah berakhir. Event tidak dapat diaktifkan kembali."
+      });
+    }
+
+    // 4. Update status
     await pool.execute(
       "UPDATE events SET status_event = ? WHERE event_id = ?",
       [status_event, id]
     );
 
     res.json({
-      message: "Status event berhasil diubah"
+      message: `Status event berhasil diubah menjadi "${status_event}"`,
+      previous_status: currentStatus,
+      new_status: status_event
     });
 
   } catch (error) {
+    console.error(error);
     res.status(500).json({
       message: "Gagal update status event"
     });
@@ -235,40 +305,101 @@ export const updateEventStatus = async (req, res) => {
 };
 
 /**
- * DELETE EVENT
+ * DELETE EVENT (WITH CASCADE DELETE)
+ * Menghapus event beserta semua data terkait (attendances, gallery, dll)
  */
 export const deleteEvent = async (req, res) => {
+  const connection = await pool.getConnection();
+  
   try {
     const { id } = req.params;
 
-    await pool.execute(
+    // Start transaction
+    await connection.beginTransaction();
+
+    // 1. Hapus gallery event
+    await connection.execute(
+      "DELETE FROM event_gallery WHERE event_id = ?",
+      [id]
+    );
+
+    // 2. Hapus event attendances
+    await connection.execute(
+      "DELETE FROM event_attendances WHERE event_id = ?",
+      [id]
+    );
+
+    // 3. Hapus event
+    const [result] = await connection.execute(
       "DELETE FROM events WHERE event_id = ?",
       [id]
     );
 
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        message: "Event tidak ditemukan"
+      });
+    }
+
+    // Commit transaction
+    await connection.commit();
+
     res.json({
-      message: "Event berhasil dihapus"
+      message: "Event dan semua data terkait berhasil dihapus"
     });
 
   } catch (error) {
+    await connection.rollback();
+    console.error(error);
     res.status(500).json({
       message: "Gagal menghapus event"
     });
+  } finally {
+    connection.release();
   }
 };
 
+/**
+ * CLOSE CHECKIN NOW (WITH VALIDATION)
+ * Validasi: Hanya bisa menutup event yang aktif
+ */
 export const closeCheckinNow = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await pool.execute(
-      "UPDATE events SET checkin_end_time = NOW() WHERE event_id = ?",
+    // Cek status event
+    const [rows] = await pool.execute(
+      "SELECT status_event FROM events WHERE event_id = ?",
       [id]
     );
 
-    res.json({ message: "Check-in berhasil ditutup sekarang" });
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Event tidak ditemukan"
+      });
+    }
+
+    if (rows[0].status_event !== "aktif") {
+      return res.status(400).json({
+        message: "Hanya event dengan status 'aktif' yang dapat ditutup check-in nya"
+      });
+    }
+
+    // Update checkin_end_time ke NOW dan ubah status jadi selesai
+    await pool.execute(
+      "UPDATE events SET checkin_end_time = NOW(), status_event = 'selesai' WHERE event_id = ?",
+      [id]
+    );
+
+    res.json({ 
+      message: "Check-in berhasil ditutup dan event diubah menjadi selesai" 
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Gagal menutup check-in" });
+    res.status(500).json({ 
+      message: "Gagal menutup check-in" 
+    });
   }
 };

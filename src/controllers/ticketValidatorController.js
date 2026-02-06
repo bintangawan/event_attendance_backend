@@ -9,9 +9,9 @@ export const validateTicket = async (req, res) => {
     }
 
     // Bersihkan token jika hasil scan berupa URL penuh
-    // Contoh: "https://web.com/ticket/TCK-123" -> "TCK-123"
     const cleanToken = token.split("/").pop();
 
+    // 1. CEK DATA TIKET
     const [rows] = await pool.execute(
       `SELECT 
         ea.ticket_token,
@@ -41,11 +41,34 @@ export const validateTicket = async (req, res) => {
 
     const data = rows[0];
 
+    // 2. CEK APAKAH SUDAH PERNAH CHECK-IN SEBELUMNYA
+    const sudahCheckin = data.status_hadir === 1;
+    let waktuCheckin = data.jam_masuk;
+
+    // 3. JIKA BELUM PERNAH CHECK-IN, BARU UPDATE
+    if (!sudahCheckin) {
+      await pool.execute(
+        "UPDATE event_attendances SET status_hadir = 1, jam_masuk = NOW() WHERE ticket_token = ?",
+        [cleanToken]
+      );
+      
+      // Ambil waktu check-in yang baru saja disimpan
+      const [updated] = await pool.execute(
+        "SELECT jam_masuk FROM event_attendances WHERE ticket_token = ?",
+        [cleanToken]
+      );
+      waktuCheckin = updated[0].jam_masuk;
+    }
+
+    // 4. KIRIM RESPON
     return res.json({
       valid: true,
-      message: "Tiket Valid",
+      message: sudahCheckin 
+        ? "Tiket Valid - Sudah Terdaftar Sebelumnya" 
+        : "Tiket Valid - Check-in Berhasil",
       data: {
         token: data.ticket_token,
+        sudahCheckin: sudahCheckin, // Flag untuk frontend
         peserta: {
           nama: data.nama_peserta,
           domisili: data.domisili,
@@ -54,7 +77,7 @@ export const validateTicket = async (req, res) => {
         event: {
           nama: data.nama_event,
           tanggal: data.tanggal_event,
-          waktu_scan: data.jam_masuk
+          waktu_scan: waktuCheckin // Gunakan waktu check-in yang tersimpan
         }
       }
     });

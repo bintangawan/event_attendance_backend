@@ -10,6 +10,8 @@ import ticketRoutes from "./routes/ticketRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import eventDetailsRoutes from "./routes/eventDetailsRoutes.js";
 import ticketValidatorRoutes from "./routes/ticketValidatorRoutes.js";
+import eventAttendanceRoutes from "./routes/eventAttendanceRoutes.js";
+import consumptionRoutes from "./routes/consumptionRoutes.js";
 
 const app = express();
 
@@ -33,5 +35,7 @@ app.use("/ticket", ticketRoutes);
 app.use("/api", publicRoutes);
 app.use("/api/eventdetails", eventDetailsRoutes);
 app.use("/api/validator", ticketValidatorRoutes);
+app.use("/api/attendance", eventAttendanceRoutes);
+app.use("/api/consumption", consumptionRoutes);
 
 export default app;
