@@ -2,13 +2,12 @@ import pool from "../config/db.js";
 
 export const validateTicket = async (req, res) => {
   try {
-    const { token } = req.body;
+    const { token, eventCode } = req.body; // Terima eventCode dari frontend
 
     if (!token) {
       return res.status(400).json({ message: "Token tiket tidak boleh kosong." });
     }
 
-    // Bersihkan token jika hasil scan berupa URL penuh
     const cleanToken = token.split("/").pop();
 
     // 1. CEK DATA TIKET
@@ -17,10 +16,12 @@ export const validateTicket = async (req, res) => {
         ea.ticket_token,
         ea.jam_masuk,
         ea.status_hadir,
+        ea.event_id,
         p.nama AS nama_peserta,
         p.alamat AS domisili,
         p.no_hp,
         e.nama_event,
+        e.event_code, 
         e.tanggal_event,
         e.jam_masuk_mulai,
         e.jam_masuk_selesai
@@ -41,6 +42,20 @@ export const validateTicket = async (req, res) => {
 
     const data = rows[0];
 
+    // --- VALIDASI EVENT (BARU) ---
+    // Jika eventCode dikirim (dari ScanPage spesifik), validasi kesesuaiannya
+    if (eventCode && data.event_code !== eventCode) {
+        return res.status(400).json({
+            valid: false,
+            code: "WRONG_EVENT",
+            message: `Tiket ini bukan untuk event ini. (Tiket: ${data.nama_event})`,
+            data: { // Tetap kirim data minimal untuk info di modal error
+                peserta: { nama: data.nama_peserta },
+                event: { nama: data.nama_event } 
+            }
+        });
+    }
+
     // 2. CEK APAKAH SUDAH PERNAH CHECK-IN SEBELUMNYA
     const sudahCheckin = data.status_hadir === 1;
     let waktuCheckin = data.jam_masuk;
@@ -52,7 +67,6 @@ export const validateTicket = async (req, res) => {
         [cleanToken]
       );
       
-      // Ambil waktu check-in yang baru saja disimpan
       const [updated] = await pool.execute(
         "SELECT jam_masuk FROM event_attendances WHERE ticket_token = ?",
         [cleanToken]
@@ -60,15 +74,16 @@ export const validateTicket = async (req, res) => {
       waktuCheckin = updated[0].jam_masuk;
     }
 
-    // 4. KIRIM RESPON
+    // 4. KIRIM RESPON SUKSES
     return res.json({
       valid: true,
+      code: sudahCheckin ? "ALREADY_CHECKED_IN" : "SUCCESS",
       message: sudahCheckin 
         ? "Tiket Valid - Sudah Terdaftar Sebelumnya" 
         : "Tiket Valid - Check-in Berhasil",
       data: {
         token: data.ticket_token,
-        sudahCheckin: sudahCheckin, // Flag untuk frontend
+        sudahCheckin: sudahCheckin, 
         peserta: {
           nama: data.nama_peserta,
           domisili: data.domisili,
@@ -77,7 +92,7 @@ export const validateTicket = async (req, res) => {
         event: {
           nama: data.nama_event,
           tanggal: data.tanggal_event,
-          waktu_scan: waktuCheckin // Gunakan waktu check-in yang tersimpan
+          waktu_scan: waktuCheckin 
         }
       }
     });

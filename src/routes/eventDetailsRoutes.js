@@ -1,24 +1,35 @@
 import express from "express";
 import { 
-  getLandingPageDetails, 
+  getPublicEventsList, 
+  getPublicEventDetail,
   updateEventDescription,
   uploadGalleryImage,
   deleteGalleryImage,
-  getEventGallery // <--- JANGAN LUPA IMPORT INI
+  getEventGallery
 } from "../controllers/eventDetailsController.js";
 import upload from "../middlewares/upload.js"; 
 
 const router = express.Router();
 
-// PUBLIC
-router.get("/", getLandingPageDetails);
+// --- PUBLIC ROUTES (No Auth Middleware needed usually, or loose auth) ---
+// URL Akhir: /api/eventdetails/public/events
+router.get("/public/events", getPublicEventsList);
 
-// ADMIN
+// URL Akhir: /api/eventdetails/public/:eventCode
+router.get("/public/:eventCode", getPublicEventDetail);
+
+
+// --- ADMIN ROUTES (Auth Required - handled in controller/middleware check usually) ---
+// URL: /api/eventdetails/:eventId/description
 router.put("/:eventId/description", updateEventDescription);
-router.post("/:eventId/gallery", upload.single("image"), uploadGalleryImage);
-router.delete("/gallery/:galleryId", deleteGalleryImage);
 
-// ROUTE BARU KHUSUS ADMIN GALLERY
-router.get("/:eventId/gallery", getEventGallery); // <--- TAMBAHKAN INI
+// URL: /api/eventdetails/:eventId/gallery
+router.post("/:eventId/gallery", upload.single("image"), uploadGalleryImage);
+
+// URL: /api/eventdetails/:eventId/gallery
+router.get("/:eventId/gallery", getEventGallery);
+
+// URL: /api/eventdetails/gallery/:galleryId
+router.delete("/gallery/:galleryId", deleteGalleryImage);
 
 export default router;
