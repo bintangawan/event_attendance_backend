@@ -65,7 +65,7 @@ export const getPublicEventDetail = async (req, res) => {
 
     const gallery = galleryRows.map((item) => ({
       id: item.gallery_id,
-      src: `${process.env.BASE_URL || "http://localhost:5000"}${item.image_url}`,
+      src: `${process.env.BASE_URL || "https://eventapi.bintangin.com"}${item.image_url}`,
       caption: item.caption || "Event Documentation",
     }));
 
@@ -123,7 +123,7 @@ export const getLandingPageDetails = async (req, res) => {
 
       gallery = galleryRows.map((item) => ({
         id: item.gallery_id,
-        src: `${process.env.BASE_URL || "http://localhost:5000"}${item.image_url}`,
+        src: `${process.env.BASE_URL || "https://eventapi.bintangin.com"}${item.image_url}`,
         caption: item.caption || "Event Documentation",
       }));
 
@@ -201,7 +201,7 @@ export const uploadGalleryImage = async (req, res) => {
       data: {
         gallery_id: result.insertId,
         image_url: imageUrl,
-        full_url: `${process.env.BASE_URL || "http://localhost:5000"}${imageUrl}`,
+        full_url: `${process.env.BASE_URL || "https://eventapi.bintangin.com"}${imageUrl}`,
         caption: caption,
       },
     });
@@ -266,7 +266,7 @@ export const getEventGallery = async (req, res) => {
 
     const gallery = rows.map((item) => ({
       id: item.gallery_id,
-      src: `${process.env.BASE_URL || "http://localhost:5000"}${item.image_url}`,
+      src: `${process.env.BASE_URL || "https://eventapi.bintangin.com"}${item.image_url}`,
       caption: item.caption || "",
     }));
 
