@@ -15,7 +15,7 @@ import consumptionRoutes from "./routes/consumptionRoutes.js";
 
 const app = express();
 
-app.use(cors({ origin: "http://localhost:5173" }));
+app.use(cors({ origin: "https://event.bintangin.com" }));
 app.use(express.json());
 
 // 2. CONFIG STATIC FOLDER (Agar gambar bisa dibuka di browser)
